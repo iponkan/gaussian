@@ -1,0 +1,18 @@
+[workspace]
+name = "gaussian-3dgs"
+version = "0.1.0"
+description = "Upload photos -> Auto 3DGS reconstruction -> Frontend 3D rendering"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tasks]
+start = "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+
+[dependencies]
+python = ">=3.10,<3.13"
+
+[pypi-dependencies]
+fastapi = ">=0.115,<1"
+uvicorn = { version = ">=0.34,<1", extras = ["standard"] }
+python-multipart = ">=0.0.20,<1"
+aiofiles = ">=24,<25"

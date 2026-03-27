@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  3dgs_backend:
+    # 使用 Nerfstudio 官方镜像，内置了 CUDA, PyTorch, COLMAP 和 3DGS 算法
+    image: ghcr.io/nerfstudio-project/nerfstudio:latest
+    container_name: nerfstudio_3dgs
+    # 必须配置 GPU 支持，3D 训练离不开显卡
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1  # 使用 1 张显卡，如果有需要可以改为 'all'
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    ports:
+      # Nerfstudio 自带一个 Web 浏览器可视化工具，默认映射到 7007
+      - "7007:7007" 
+    volumes:
+      # 将宿主机的目录挂载到容器内，方便前后端数据交互
+      - ./data/uploads:/workspace/inputs    # 前端上传的照片保存在这里
+      - ./data/exports:/workspace/exports   # 训练好导出的 3D 模型 (.ply) 保存在这里
+      - ./data/outputs:/workspace/outputs   # 训练过程的中间权重文件
+    # 默认让容器在后台保持运行状态，等待您的业务代码进入容器触发训练任务
+    command: tail -f /dev/null

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv
+venv/
+ENV/
+.pixi/
+
+# Data and Models (Very Important to ignore)
+data/
+outputs/
+inputs/
+exports/
+
+# Nerfstudio temp files
+ns_info.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
