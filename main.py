@@ -93,28 +93,52 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 # ──────────────────────── 工具函数 ────────────────────────
 
 async def run_command(cmd: str, task: TaskInfo, timeout: int = 7200) -> str:
-    """异步执行 Shell 命令，返回 stdout"""
-    print(f"[{task.task_id}] 执行命令: {cmd}")
+    """异步执行 Shell 命令，并实时打印日志"""
+    print(f"[{task.task_id}] 开始命令: {cmd}")
     try:
         process = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=timeout
+
+        all_stdout = []
+
+        async def read_stream(stream, is_stderr=False):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").strip()
+                if text:
+                    prefix = " (STDERR)" if is_stderr else ""
+                    print(f"[{task.task_id}]{prefix} {text}")
+                    all_stdout.append(text)
+                    # 可以在这里根据日志内容更精细地更新进度
+                    if "Step" in text and "/7000" in text:
+                        try:
+                            # 提取类似 [Step 1200/7000] 的进度
+                            parts = text.split("Step")[1].split("/")[0].strip()
+                            step = int(parts)
+                            # 训练进度占总进度的 35-80% 之间
+                            task.progress = int(35 + (step / 7000) * 45)
+                        except:
+                            pass
+
+        # 并行读取 stdout 和 stderr
+        await asyncio.gather(
+            read_stream(process.stdout),
+            read_stream(process.stderr, is_stderr=True)
         )
-        stdout_text = stdout.decode("utf-8", errors="replace")
-        stderr_text = stderr.decode("utf-8", errors="replace")
+
+        await asyncio.wait_for(process.wait(), timeout=timeout)
 
         if process.returncode != 0:
-            error_msg = stderr_text or stdout_text
-            print(f"[{task.task_id}] 命令失败 (code={process.returncode}): {error_msg}")
-            raise RuntimeError(f"命令执行失败 (exit code {process.returncode}): {error_msg[:500]}")
+            raise RuntimeError(f"命令执行失败 (exit code {process.returncode})")
 
-        print(f"[{task.task_id}] 命令成功完成")
-        return stdout_text
+        return "\n".join(all_stdout)
     except asyncio.TimeoutError:
+        print(f"[{task.task_id}] 命令超时!")
         raise RuntimeError(f"命令执行超时 ({timeout}s)")
 
 
@@ -145,16 +169,37 @@ async def reconstruction_pipeline(task: TaskInfo):
     task_id = task.task_id
 
     try:
+        # ──── 动态参数配置 ────
+        img_count = task.file_count
+        if img_count <= 30:
+            # 极少照片时：为了彻底把 150MB 降到 30MB 左右
+            # 我们需要让高斯球更难分裂、更容易被剔除，并且提早结束训练。
+            matching_method = "exhaustive"
+            densify_thresh = 0.0003     # 升高增殖门槛，防止飞絮产生
+            cull_thresh = 0.2           # 大幅升高透明度剔除，无情切掉背景杂乱模糊的高斯球
+            max_iters = 3500            # 图片少时，过多的训练回合会导致过度拟合空洞，早早喊停
+        elif img_count <= 100:
+            matching_method = "vocab_tree"
+            densify_thresh = 0.0002
+            cull_thresh = 0.1
+            max_iters = 7000
+        else:
+            matching_method = "vocab_tree"
+            densify_thresh = 0.0002
+            cull_thresh = 0.1
+            max_iters = 7000
+
         # ──── 步骤 1: 计算相机位姿 (COLMAP) ────
         task.status = TaskStatus.PROCESSING
         task.progress = 10
-        task.message = "正在计算相机位姿 (COLMAP)..."
+        task.message = f"正在计算相机位姿 (匹配模式: {matching_method})..."
 
         cmd_process = (
             f"docker exec {CONTAINER_NAME} "
             f"ns-process-data images "
             f"--data /workspace/inputs/{task_id}/images "
-            f"--output-dir /workspace/inputs/{task_id}_processed"
+            f"--output-dir /workspace/inputs/{task_id}_processed "
+            f"--matching-method {matching_method}"
         )
         await run_command(cmd_process, task)
         task.progress = 30
@@ -163,14 +208,17 @@ async def reconstruction_pipeline(task: TaskInfo):
         # ──── 步骤 2: 训练 3DGS 模型 ────
         task.status = TaskStatus.TRAINING
         task.progress = 35
-        task.message = "正在训练 3DGS 模型 (splatfacto)..."
+        task.message = f"正在训练 3DGS 模型 (最大回合数: {max_iters})..."
 
         cmd_train = (
             f"docker exec {CONTAINER_NAME} "
             f"ns-train splatfacto "
             f"--data /workspace/inputs/{task_id}_processed "
-            f"--max-num-iterations {MAX_ITERATIONS} "
-            f"--output-dir /workspace/outputs/{task_id}"
+            f"--max-num-iterations {max_iters} "
+            f"--output-dir /workspace/outputs/{task_id} "
+            f"--viewer.quit-on-train-completion True "
+            f"--pipeline.model.densify-grad-thresh {densify_thresh} "
+            f"--pipeline.model.cull-alpha-thresh {cull_thresh}"
         )
         await run_command(cmd_train, task, timeout=7200)
         task.progress = 80
