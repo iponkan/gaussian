@@ -1,18 +1,35 @@
 [workspace]
-name = "gaussian-3dgs"
+name = "gaussian"
 version = "0.1.0"
-description = "Upload photos -> Auto 3DGS reconstruction -> Frontend 3D rendering"
+description = "TripoSR Image-to-3D Local Workstation"
+authors = ["Antigravity <admin@google.com>"]
 channels = ["conda-forge"]
 platforms = ["linux-64"]
 
 [tasks]
-start = "uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+start = "uvicorn main:app --host 0.0.0.0 --port 8000"
 
 [dependencies]
-python = ">=3.10,<3.13"
+python = ">=3.10,<3.12"
+fastapi = ">=0.100"
+uvicorn = ">=0.23"
+python-multipart = ">=0.0.6"
+aiofiles = ">=23.2"
+jinja2 = "*"
+rembg = "*"
 
 [pypi-dependencies]
-fastapi = ">=0.115,<1"
-uvicorn = { version = ">=0.34,<1", extras = ["standard"] }
-python-multipart = ">=0.0.20,<1"
-aiofiles = ">=24,<25"
+torch = ">=2.1"
+torchvision = ">=0.16"
+transformers = "*"
+accelerate = "*"
+trimesh = "*"
+xformers = "*"
+einops = "*"
+omegaconf = "*"
+pillow = "*"
+numpy = "*"
+mcubes = "*"
+moderngl = "*"
+xatlas = ">=0.0.11, <0.0.12"
+pymcubes = ">=0.1.6, <0.2"

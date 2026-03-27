@@ -5,26 +5,51 @@
 - 宿主机 `./data/outputs` 挂载到容器 `/workspace/outputs`
 - 宿主机 `./data/exports` 挂载到容器 `/workspace/exports`
 
-现在，请帮我编写完整的前后端代码，实现一个完整的“上传照片 -> 自动生成 3DGS 模型 -> 前端渲染”的系统。
+# TripoSR 瞬时 3D 大模型生成系统
 
-### 技术栈与环境要求：
-1. 后端：Python 3.10 + FastAPI + Uvicorn。
-2. **包管理：必须使用 `Pixi` 来管理 Python 环境和依赖。请勿使用 pip 或 venv。**
-3. 前端：原生 HTML + Vanilla JavaScript + WebGL 3DGS 渲染库（推荐使用开源的 `mkkellogg/GaussianSplats3D` 或 `antimatter15/splat`，如果太复杂，请提供指导我引入相关的 CDN，或者先只提供模型下载链接）。
-4. 进程管理：后端需要能异步执行 Shell 命令与 Docker 容器交互。
+本项目是一个基于 **TripoSR** 的本地化单图到三维模型生成工作流。通过上传单张或少量图片，利用基于 LRM (Large Reconstruction Model) 架构的生成式 3D AI，秒级输出高保真的 3D 实体模型 (`.obj` / `.glb`)，彻底解决传统摄影测量算法 (例如 COLMAP) 对于反光、纯色抛光表面 (如汽车、金属) 几何重建失败的痛点。
 
-### 一、 后端需求 (FastAPI)
-请编写一个 `main.py`，包含以下接口和逻辑：
-1. **POST `/api/upload`**：
-   - 接收前端上传的多张图片文件。
-   - 生成一个唯一的 UUID 作为 `task_id`。
-   - 将接收到的图片保存到宿主机的 `./data/uploads/{task_id}/images/` 目录下。
-   - 响应成功并返回 `task_id`，然后在后台异步启动 3D 重建流程，不能阻塞主线程。
+本项目采用前后端分离设计，完全基于本地计算 (如 RTX 5880) 完成 AI 生成。
 
-2. **异步 3D 重建流程 (核心逻辑)**：
-   请使用 Python 的 `subprocess` 模块，按顺序向正在运行的 `nerfstudio_3dgs` 容器发送以下 `docker exec` 命令：
-   - 步骤 1 (计算相机位姿)：`docker exec nerfstudio_3dgs ns-process-data images --data /workspace/inputs/{task_id}/images --output-dir /workspace/inputs/{task_id}_processed`
-   - 步骤 2 (训练 3DGS 模型)：`docker exec nerfstudio_3dgs ns-train splatfacto --data /workspace/inputs/{task_id}_processed --max-num-iterations 7000 --output-dir /workspace/outputs/{task_id}` (注意：必须指定 max-num-iterations 7000，否则训练不会自动停止)。
+---
+
+## 🏗️ 系统架构
+
+*   **前端 (HTML/JS/CSS)**：
+    *   单页应用 (SPA)，使用纯原生 JavaScript 和 Tailwind 风格的 CSS 实现现代暗黑界面。
+    *   **3D 模型渲染**：采用 Google 的 `<model-viewer>` 组件直接在浏览器中渲染输出的 3D 模型 (.obj 或 .glb格式)。
+    *   拖拽式上传、WebSocket 风格的状态轮询以展示 AI 推理进度。
+
+*   **后端 (FastAPI + Python)**：
+    *   使用 `FastAPI` 构建轻量异步 API 服务器。
+    *   **AI 抠图管道**：使用 `rembg[gpu]` 自动剥离图片背景，净化生成质量。
+    *   **TripoSR 引擎集成**：利用 PyTorch 前馈大模型对输入图片进行秒级张量推理，直接合成完整 Mesh 结构并在本地输出 3D 模型。
+
+*   **环境依赖 (Pixi)**：
+    *   整个 Python 运行环境及所有前沿 AI 库基于轻量化的 `pixi.toml` 管理，不污染宿主机系统。
+
+## ⚙️ 环境自动配置 (Pixi)
+
+本项目依赖以下核心环境包，可通过 `pixi run start` 自动激活与加载：
+- `fastapi`, `uvicorn`, `python-multipart`
+- `torch`, `torchvision`, `torchaudio`
+- `transformers`, `accelerate`, `xformers`
+- `trimesh`, `rembg[gpu]`, `omegaconf`, `einops`
+
+## 🚀 启动与运行
+
+1. 安装依赖包：
+```bash
+pixi install
+```
+
+2. 点击运行后端：
+```bash
+pixi run start
+```
+如果需要调试，可尝试：`uvicorn main:app --host 0.0.0.0 --port 8000 --reload`。
+
+前端默认在 `http://127.0.0.1:8000` 启动，上传 1 张带主体的图片后即可见证 3 秒钟大模型奇迹。
    - 步骤 3 (导出通用模型)：利用 shell 命令找到刚才训练生成的 `config.yml` 文件路径，然后执行导出：`docker exec nerfstudio_3dgs ns-export gaussian-splat --load-config <找到的config.yml路径> --output-dir /workspace/exports/{task_id}`
 
 3. **GET `/api/status/{task_id}`**：
